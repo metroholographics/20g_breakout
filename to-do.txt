@@ -1,0 +1,5 @@
+to-do:
+- set-up git
+- init SDL window and core loop
+- make 120fps
+- 
