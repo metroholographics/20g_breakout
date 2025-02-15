@@ -1,6 +1,10 @@
 to-do:
 ~ set-up git
 ~ init SDL window and core loop
-* draw moveable player paddle
-* make 120fps
-- 
+~ draw moveable player paddle
+~ make 120fps
+* make ball spawn and fire with space
+- create brick wall data structure
+- draw brick walls
+- add ball collision
+ 
