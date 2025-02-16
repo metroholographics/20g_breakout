@@ -7,9 +7,21 @@
 #define TARGET_DT (1.0 / TARGET_FPS)
 #define WIDTH 960
 #define HEIGHT 640
+
 #define PADDLE_W WIDTH * 0.18
 #define PADDLE_H HEIGHT * 0.03
+
 #define BALL_SIZE 15
+
+#define BLOCK_COLS 8
+#define BLOCK_ROWS 14
+#define BLOCK_X_OFFSET 2
+#define BLOCK_Y_OFFSET 2
+#define BLOCK_W (WIDTH - BLOCK_ROWS * BLOCK_X_OFFSET) / (BLOCK_ROWS)
+#define BLOCK_H ((float)HEIGHT / 3) / (BLOCK_COLS)
+#define BLOCK_W_GAP (float) (WIDTH - ((float)BLOCK_ROWS * BLOCK_W))
+
+#define HOTBAR_H 40
 
 SDL_Color off_black = {33, 33, 33, 255};
 SDL_Color black = {10, 10, 10, 255};
@@ -42,11 +54,19 @@ typedef struct {
 } Ball;
 
 typedef struct {
+    SDL_FRect shape;
+    bool alive;
+    SDL_Color color;
+    int points;
+} Block;
+
+typedef struct {
     SDL_Window* window;
     SDL_Renderer* renderer;
     Player player;
     Ball ball;
     PlayStatus status;
+    Block blocks[8][14];
 } GameState;
 
 GameState *game = NULL;
@@ -81,8 +101,43 @@ bool gamestate_create() {
             .w = BALL_SIZE, .h = BALL_SIZE
         },
         .move_speed = HEIGHT * 0.5f,   
-    };    
+    };
 
+    for (int y = 0; y < BLOCK_COLS; y++) {
+        for (int x = 0; x < BLOCK_ROWS; x++) {
+            game->blocks[y][x].alive = true;
+            game->blocks[y][x].shape = (SDL_FRect) {
+                .x = (x * (float)BLOCK_W),
+                .y = (HOTBAR_H + BLOCK_Y_OFFSET + ((y * BLOCK_H) + (y * BLOCK_Y_OFFSET))),
+                .w = (float)BLOCK_W - BLOCK_X_OFFSET,
+                .h = BLOCK_H
+            };
+            switch (y) {
+                case 0:
+                case 1:
+                    game->blocks[y][x].color = red;
+                    game->blocks[y][x].points = 7;
+                    break;
+                case 2:
+                case 3:
+                    game->blocks[y][x].color = pink;
+                    game->blocks[y][x].points = 5;
+                    break;
+                case 4:
+                case 5:
+                    game->blocks[y][x].color = green;
+                    game->blocks[y][x].points = 3;
+                    break;
+                case 6:
+                case 7:
+                    game->blocks[y][x].color = yellow;
+                    game->blocks[y][x].points = 1;
+                    break;
+                default:
+                    break;
+            }
+        }
+    }    
 
     return true;
 }
@@ -113,7 +168,7 @@ void update_game(double dt) {
         if (game->status == RESET_ROUND) {
             game->ball.shape.x = game->player.shape.x + (0.5f*game->player.shape.w);
             game->ball.vel_y = -1;
-            game->ball.vel_x = 0.5f;
+            game->ball.vel_x = 0.0f;
         } else {
             new_x = (game->ball.vel_x * game->ball.move_speed * dt);
             new_y = (game->ball.vel_y * game->ball.move_speed * dt);
@@ -145,7 +200,25 @@ void draw_game() {
     SDL_SetRenderDrawColor(game->renderer, off_black.r, off_black.g, off_black.b, off_black.a);
     SDL_RenderClear(game->renderer);
 
+    //::draw grid
+    for (Block *b = &game->blocks[0][0]; b < &game->blocks[0][0] + (BLOCK_COLS * BLOCK_ROWS); b++) {
+        if (b->alive) {
+            //printf("x");
+            SDL_SetRenderDrawColor(game->renderer, b->color.r, b->color.g, b->color.b, b->color.a);
+            SDL_FRect dest = b->shape;
+            dest.x = (0.5f * BLOCK_W_GAP) + BLOCK_X_OFFSET + dest.x;
+            SDL_RenderFillRect(game->renderer, &dest);
+        }
+    }
 
+    // for (int i = 0; i < BLOCK_COLS; i++) {
+    //     SDL_SetRenderDrawColor(game->renderer, 255, 255, 255, 255);
+    //     for (int x = 0; x < BLOCK_ROWS; x ++) {
+    //         SDL_RenderFillRect(game->renderer, &game->blocks[i][x].shape);
+    //     }
+    // }
+
+    
     //::draw ball
     SDL_SetRenderDrawColor(game->renderer, white.r, white.g, white.b, white.a);
     SDL_RenderFillRect(game->renderer, &game->ball.shape);
