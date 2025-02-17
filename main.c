@@ -6,12 +6,13 @@
 #define TARGET_FPS 120
 #define TARGET_DT (1.0 / TARGET_FPS)
 #define WIDTH 960
-#define HEIGHT 640
+#define HEIGHT 700
 
 #define PADDLE_W WIDTH * 0.18
 #define PADDLE_H HEIGHT * 0.03
 
-#define BALL_SIZE 15
+#define BALL_SIZE 10
+#define MIN_BALL_SPEED HEIGHT * 0.5
 
 #define BLOCK_COLS 8
 #define BLOCK_ROWS 14
@@ -36,7 +37,6 @@ typedef enum {
     RESET_ROUND,
     IN_PLAY,
 } PlayStatus;
-
 
 typedef struct {
     SDL_FRect shape;
@@ -74,7 +74,7 @@ GameState *game = NULL;
 bool gamestate_create() {
     game = malloc(sizeof(GameState));
 
-    game->window = SDL_CreateWindow("20g_pong", WIDTH, HEIGHT, 0);
+    game->window = SDL_CreateWindow("20g_breakout", WIDTH, HEIGHT, 0);
     if (game->window == NULL) {
         printf("Error_window: %s\n", SDL_GetError());
         return false;
@@ -100,14 +100,14 @@ bool gamestate_create() {
             .y = (game->player.shape.y - BALL_SIZE),
             .w = BALL_SIZE, .h = BALL_SIZE
         },
-        .move_speed = HEIGHT * 0.5f,   
+        .move_speed = MIN_BALL_SPEED,   
     };
 
     for (int y = 0; y < BLOCK_COLS; y++) {
         for (int x = 0; x < BLOCK_ROWS; x++) {
             game->blocks[y][x].alive = true;
             game->blocks[y][x].shape = (SDL_FRect) {
-                .x = (x * (float)BLOCK_W),
+                .x = (0.5f * BLOCK_W_GAP + BLOCK_X_OFFSET) + (x * (float)BLOCK_W),
                 .y = (HOTBAR_H + BLOCK_Y_OFFSET + ((y * BLOCK_H) + (y * BLOCK_Y_OFFSET))),
                 .w = (float)BLOCK_W - BLOCK_X_OFFSET,
                 .h = BLOCK_H
@@ -157,30 +157,83 @@ void free_gamestate() {
     game = NULL;
 }
 
+bool get_collision(SDL_FRect a, SDL_FRect b) {
+
+    if (a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y) {
+        return true;
+    }
+
+    return false;
+}
+
+
 void update_game(double dt) {
 
     {
         //::update ball
-        float curr_x = game->ball.shape.x;
-        float curr_y = game->ball.shape.y;
+        // float curr_x = game->ball.shape.x;
+        // float curr_y = game->ball.shape.y;
         float new_x = 0.0f;
         float new_y = 0.0f;
+        
         if (game->status == RESET_ROUND) {
             game->ball.shape.x = game->player.shape.x + (0.5f*game->player.shape.w);
-            game->ball.vel_y = -1;
+            game->ball.vel_y = -1.0f;
             game->ball.vel_x = 0.0f;
         } else {
-            new_x = (game->ball.vel_x * game->ball.move_speed * dt);
-            new_y = (game->ball.vel_y * game->ball.move_speed * dt);
-            if (curr_x + new_x <= 0 || curr_x + new_x + BALL_SIZE > WIDTH) {
-                game->ball.vel_x *= -1;
+            if (game->ball.vel_x == 0.0f || game->ball.vel_x == -0.0f) game->ball.vel_x = 0.003f;
+            
+            float dynamic_move_x = (game->ball.move_speed + ((1.0f - SDL_fabsf(game->ball.vel_x)) * game->ball.move_speed));
+            float dynamic_move_y = (game->ball.move_speed * (1.0f + (1.0f - SDL_fabs(game->ball.vel_x))));
+            // printf("y %f ,  move_y %f\n",game->ball.vel_y, dynamic_move_y);
+             
+            new_x = (game->ball.vel_x * dynamic_move_x * dt);
+            new_y = (game->ball.vel_y * dynamic_move_y * dt);
+            Ball collider = game->ball;
+            collider.shape.x += new_x;
+            collider.shape.y += new_y;
+                
+            if (collider.shape.x <= 0 || collider.shape.x + BALL_SIZE > WIDTH) {
+                if (collider.vel_x == 0.0f || collider.vel_x == -0.0f) {
+                    collider.vel_x = 0.5f;
+                }
+                collider.vel_x *= -1;
+                goto exit_collision;
             }
-            if (curr_y + new_y <= 0) {
-                game->ball.vel_y *= -1;
-            } 
+            if (collider.shape.y <= 0) {
+                collider.vel_y *= -1;      
+                goto exit_collision;
+            }
+            if (get_collision(collider.shape, game->player.shape)) {
+                float mid_collider = collider.shape.x + (0.5f * collider.shape.w);
+                float mid_paddle = game->player.shape.x + (0.5f * game->player.shape.w);
+                float end_paddle = game->player.shape.x + game->player.shape.w;
+                float half_paddle_size = PADDLE_W * 0.5f;
+
+                if (mid_collider > mid_paddle) {
+                    float relative_pos = half_paddle_size  - (end_paddle - mid_collider);
+                    collider.vel_x = relative_pos / 100.0f;
+                } else if (collider.shape.x < game->player.shape.x + (0.5f * game->player.shape.w)) {
+                    float relative_pos = half_paddle_size - (mid_collider - game->player.shape.x);
+                    collider.vel_x = -1 * (relative_pos / 100.0f);
+                } 
+                collider.vel_y = -1;
+                goto exit_collision;
+            }
+
+            for (Block *b = &game->blocks[0][0]; b < &game->blocks[0][0] + (BLOCK_ROWS * BLOCK_COLS); b++) {
+                if (b->alive) {
+                    if (get_collision(collider.shape, b->shape)) {
+                        collider.vel_x = (collider.vel_x >= 0.0f) ? 0.3f : -0.3f;
+                        collider.vel_y *= -1;
+                        b->alive = false;
+                        goto exit_collision;
+                    }    
+                }
+            }
+            exit_collision:           
+            game->ball = collider; 
         }
-        game->ball.shape.x += new_x;
-        game->ball.shape.y += new_y;
     }
     
     { 
@@ -203,22 +256,10 @@ void draw_game() {
     //::draw grid
     for (Block *b = &game->blocks[0][0]; b < &game->blocks[0][0] + (BLOCK_COLS * BLOCK_ROWS); b++) {
         if (b->alive) {
-            //printf("x");
             SDL_SetRenderDrawColor(game->renderer, b->color.r, b->color.g, b->color.b, b->color.a);
-            SDL_FRect dest = b->shape;
-            dest.x = (0.5f * BLOCK_W_GAP) + BLOCK_X_OFFSET + dest.x;
-            SDL_RenderFillRect(game->renderer, &dest);
+            SDL_RenderFillRect(game->renderer, &b->shape);
         }
-    }
-
-    // for (int i = 0; i < BLOCK_COLS; i++) {
-    //     SDL_SetRenderDrawColor(game->renderer, 255, 255, 255, 255);
-    //     for (int x = 0; x < BLOCK_ROWS; x ++) {
-    //         SDL_RenderFillRect(game->renderer, &game->blocks[i][x].shape);
-    //     }
-    // }
-
-    
+    }    
     //::draw ball
     SDL_SetRenderDrawColor(game->renderer, white.r, white.g, white.b, white.a);
     SDL_RenderFillRect(game->renderer, &game->ball.shape);

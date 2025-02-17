@@ -4,7 +4,10 @@ to-do:
 ~ draw moveable player paddle
 ~ make 120fps
 ~ make ball spawn and fire with space
-* create brick wall data structure
-* draw brick walls
-- add ball collision
- 
+~ create brick wall data structure
+~ draw brick walls
+* add ball collision (bricks, paddle)
+- add scoring and life tracking
+- display scoring and lives
+- save high-score
+- add ball speed power-up and paddle shift
