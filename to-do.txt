@@ -6,8 +6,10 @@ to-do:
 ~ make ball spawn and fire with space
 ~ create brick wall data structure
 ~ draw brick walls
-* add ball collision (bricks, paddle)
-- add scoring and life tracking
-- display scoring and lives
+~ add ball collision (bricks, paddle)
+* add scoring and life tracking and reset
+* display scoring and lives
+* add and display time
 - save high-score
 - add ball speed power-up and paddle shift
+- add menu
