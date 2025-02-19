@@ -49,11 +49,13 @@ typedef enum {
     POINTS,
     TIME,
     HIGH_SCORE,
+    MENU,
     MAX_UITypes
 } UIType;
 
 
 typedef enum {
+    IN_MENU,
     RESET_ROUND,
     GAME_OVER,
     IN_PLAY,
@@ -73,6 +75,7 @@ typedef struct {
     bool move_left;
     bool move_right;
     bool game_started;
+    bool half_size;
 } Player;
 
 typedef struct {
@@ -80,6 +83,7 @@ typedef struct {
     float vel_x;
     float vel_y;
     float move_speed;
+    float speed_modifier;
 } Ball;
 
 typedef struct {
@@ -99,6 +103,7 @@ typedef struct {
 typedef struct {
     SDL_Window* window;
     SDL_Renderer* renderer;
+    TTF_TextEngine* text_engine;
     Player player;
     Ball ball;
     PlayStatus status;
@@ -110,12 +115,18 @@ typedef struct {
     TextElements ui_elements[MAX_UITypes];
     TTF_Font* font;
     int brick_count;
+    int consecutive_hits;
+    bool first_hit_pink_or_red;
+    bool first_hit_top_wall;
     Timer time;
+    TTF_Text* menu_text;
+    TTF_Text* menu_score_text;
 } GameState;
 
 GameState *game = NULL;
 
 void populate_ui_textures(UIType i) {
+    TTF_SetFontSize(game->font, 16);
     SDL_Surface* s;
     switch (i) {
         case LIVES: {
@@ -239,26 +250,32 @@ bool gamestate_create() {
         return false;
     }
 
+    game->text_engine = TTF_CreateRendererTextEngine(game->renderer);
+    if (game->text_engine == NULL) {
+        printf("Error_text_engine\n");
+        return false;
+    }
+
+    game->menu_text = NULL;
     game->hiscore = load_save_file();
-
     game->time = (Timer) {.minutes = 0, .seconds = 0, .previous_time = 0};
-
     game->brick_count = BLOCK_COLS * BLOCK_ROWS;
-
+    game->consecutive_hits = 0;
+    game->first_hit_pink_or_red = false;
+    game->first_hit_top_wall = false;
     game->hotbar = (SDL_FRect) {.x = 0, .y = 0, .w = WIDTH, .h = HOTBAR_H};
-
-    game->status = RESET_ROUND;
-
+    game->status = IN_MENU;
     game->points = 0;
     game->lives = MAX_LIVES;
     
     game->player = (Player) {
         .shape = (SDL_FRect) {.x = (WIDTH * 0.5f) - (PADDLE_W * 0.5f), .y = HEIGHT - (2*PADDLE_H), .w = PADDLE_W, .h = PADDLE_H},
-        .move_speed = WIDTH * 0.5f,
+        .move_speed = WIDTH * 0.6f,
         .move_left = false,
         .move_right = false,
         .colour = grey,
         .game_started = false,
+        .half_size = false,
     };
     
     game->ball = (Ball) {
@@ -267,7 +284,8 @@ bool gamestate_create() {
             .y = (game->player.shape.y - BALL_SIZE),
             .w = BALL_SIZE, .h = BALL_SIZE
         },
-        .move_speed = MIN_BALL_SPEED,   
+        .move_speed = MIN_BALL_SPEED,
+        .speed_modifier = 0.9f,   
     };
 
     for (int y = 0; y < BLOCK_COLS; y++) {
@@ -324,6 +342,12 @@ void free_gamestate() {
     game->renderer = NULL;
     SDL_DestroyWindow(game->window);
     game->window = NULL;
+    TTF_DestroyRendererTextEngine(game->text_engine);
+    game->window = NULL;
+    TTF_DestroyText(game->menu_text);
+    game->menu_text = NULL;
+    TTF_DestroyText(game->menu_score_text);
+    game->menu_score_text = NULL;
     
     for (int i = 0; i < MAX_UITypes; i++) {
         if (game->ui_elements[i].texture != NULL) {
@@ -345,10 +369,8 @@ bool get_collision(SDL_FRect a, SDL_FRect b) {
     return false;
 }
 
-
-
 void update_game(double dt) {
-
+    
     bool life_update = false;
     bool score_update = false;
 
@@ -374,30 +396,48 @@ void update_game(double dt) {
         //::update ball
         float new_x = 0.0f;
         float new_y = 0.0f;
-        
+
+        if (game->consecutive_hits == 0 || game->status == RESET_ROUND) {
+            game->ball.speed_modifier = 0.9f;
+        }
+
+        if (game->first_hit_pink_or_red) {
+            game->ball.move_speed = MIN_BALL_SPEED + 50;
+        }
+
+        if (game->consecutive_hits == 4 || game->consecutive_hits == 13) {   
+            game->consecutive_hits += 1;
+            game->ball.speed_modifier = game->ball.speed_modifier + 0.25f;
+        }
+    
         if (game->status == RESET_ROUND || game->status == GAME_OVER) {
+            game->first_hit_top_wall = false;
+            game->first_hit_pink_or_red = false;
+            game->consecutive_hits = 0;
             game->ball.shape.x = game->player.shape.x + (0.5f*game->player.shape.w);
             game->ball.shape.y = game->player.shape.y - BALL_SIZE;
             game->ball.vel_y = -1.0f;
             game->ball.vel_x = 0.0f;
+            game->ball.move_speed = MIN_BALL_SPEED;
         } else {
             if (game->ball.vel_x == 0.0f || game->ball.vel_x == -0.0f) game->ball.vel_x = 0.003f;
-            
-            float dynamic_move_x = (game->ball.move_speed + ((1.0f - SDL_fabsf(game->ball.vel_x)) * game->ball.move_speed));
-            float dynamic_move_y = (game->ball.move_speed * (1.0f + (1.0f - SDL_fabs(game->ball.vel_x))));
-             
+        
+            float dynamic_move_x = game->ball.speed_modifier * (game->ball.move_speed + ((1.0f - SDL_fabsf(game->ball.vel_x)) * game->ball.move_speed));
+            float dynamic_move_y = game->ball.speed_modifier * (game->ball.move_speed * (1.0f + (1.0f - SDL_fabs(game->ball.vel_x))));
+         
             new_x = (game->ball.vel_x * dynamic_move_x * dt);
             new_y = (game->ball.vel_y * dynamic_move_y * dt);
             Ball collider = game->ball;
             collider.shape.x += new_x;
             collider.shape.y += new_y;
-                
+            
             if (collider.shape.x <= 0 || collider.shape.x + BALL_SIZE > WIDTH) {
                 collider.vel_x *= -1;
                 goto exit_collision;
             }
-            
+        
             if (collider.shape.y <= HOTBAR_H) {
+                game->first_hit_top_wall = true;
                 collider.vel_y *= -1;      
                 goto exit_collision;
             }
@@ -408,7 +448,7 @@ void update_game(double dt) {
                 game->status = RESET_ROUND;
                 goto exit_collision;
             }
-            
+        
             if (get_collision(collider.shape, game->player.shape)) {
                 float mid_collider = collider.shape.x + (0.5f * collider.shape.w);
                 float mid_paddle = game->player.shape.x + (0.5f * game->player.shape.w);
@@ -431,28 +471,38 @@ void update_game(double dt) {
                     if (get_collision(collider.shape, b->shape)) {
                         collider.vel_x = (collider.vel_x >= 0.0f) ? BLOCK_COLLISION_ANGLE : -BLOCK_COLLISION_ANGLE;
                         collider.vel_y *= -1;
+                        game->consecutive_hits += 1;
+                        if ((b->points == PINK_POINTS || b->points == RED_POINTS) && !game->first_hit_pink_or_red) {
+                            game->first_hit_pink_or_red = true;
+                        }
                         b->alive = false;
                         game->brick_count -=1;
                         game->points += b->points;
                         score_update = true;
                         goto exit_collision;
-                                                
+                                            
                     }    
                 }
             }
             exit_collision:           
             game->ball = collider; 
         }
+    
     }
     
     { 
-        //::update player 
+        //::update player
+        if (game->first_hit_top_wall && !game->player.half_size) {
+            game->player.half_size = true;
+            game->player.shape.w *= 0.5f;
+            game->player.shape.x += 0.5f * PADDLE_W;
+        } 
         if (game->player.move_left && !game->player.move_right) game->player.velocity = -1;
         else if (game->player.move_right && !game->player.move_left) game->player.velocity = 1;
         else game->player.velocity = 0;
         
         float new_x = game->player.shape.x + (game->player.velocity * game->player.move_speed * dt);
-        if (new_x < 0 || new_x + PADDLE_W > WIDTH) new_x = game->player.shape.x;
+        if (new_x < 0 || new_x + game->player.shape.w > WIDTH) new_x = game->player.shape.x;
         game->player.shape.x = new_x;     
     }
 
@@ -472,13 +522,20 @@ void update_game(double dt) {
     }
 }
 
+void make_menu_text(void) {
+    char menu_buffer[50];
+    sprintf(menu_buffer, "20g_breakout\nplay: y/n");
+    game->menu_text = TTF_CreateText(game->text_engine, game->font, menu_buffer, 0);
+}
+
 void draw_game() {
+    SDL_SetRenderDrawBlendMode(game->renderer, SDL_BLENDMODE_NONE);
     SDL_SetRenderDrawColor(game->renderer, off_black.r, off_black.g, off_black.b, off_black.a);
     SDL_RenderClear(game->renderer);
 
     //::draw ui
     for (int i = 0; i < MAX_UITypes; i++) {
-        if (game->ui_elements[i].texture != NULL) {
+        if (game->ui_elements[i].texture != NULL && i != MENU) {
             SDL_FRect dest;
             SDL_GetTextureSize(game->ui_elements[i].texture, &dest.w, &dest.h);
             float remaining_h = HOTBAR_H - dest.h;
@@ -504,6 +561,23 @@ void draw_game() {
     SDL_SetRenderDrawColor(game->renderer, p.colour.r, p.colour.g, p.colour.b, p.colour.a);
     SDL_RenderFillRect(game->renderer, &p.shape);
 
+    //::draw menu
+    if (game->status == IN_MENU) {
+        if (!SDL_SetRenderDrawBlendMode(game->renderer, SDL_BLENDMODE_BLEND_PREMULTIPLIED)) {
+                printf("Error_blend: %s\n", SDL_GetError());
+        }
+        SDL_SetRenderDrawColor(game->renderer, black.r, black.g, black.b, 128);
+        SDL_FRect dest = (SDL_FRect) {.x = WIDTH * 0.2f, .y = HEIGHT * 0.1f, .w = WIDTH * 0.6f, .h = HEIGHT * 0.6f};
+        SDL_RenderFillRect(game->renderer, &dest);
+        
+        TTF_SetFontSize(game->font, 36);
+        TTF_DrawRendererText(game->menu_text, dest.x + 20, dest.y + 15);
+        //::todo render the player score text if just completed a game - player.game_started == true. Will need to update the
+        // this score text after each game ends.
+        
+    }
+       
+    
     SDL_RenderPresent(game->renderer);
 }
 
@@ -515,6 +589,7 @@ int main(int argc, char* argv[]) {
         return -1;
     }
 
+    
     if (!TTF_Init()) {
         printf("Error_ttf_init: %s\n", SDL_GetError());
         return -1;
@@ -524,12 +599,16 @@ int main(int argc, char* argv[]) {
     if (gamestate_create()) {
         running = true;
     }
+
+    make_menu_text();
     
     SDL_Event e;
         
     uint64_t current_time = SDL_GetPerformanceCounter();
     uint64_t last_time = 0;
     double delta_time = 0.0f;
+
+    game->status = IN_MENU;
     
     while (running) {
         last_time = current_time;
@@ -542,18 +621,31 @@ int main(int argc, char* argv[]) {
                 running = false;
                 break;
             }
-            if (e.type == SDL_EVENT_KEY_DOWN) {
+            if (e.type == SDL_EVENT_KEY_DOWN && game->status != IN_MENU) {
                 switch (e.key.key) {
                     case SDLK_A:
                     case SDLK_LEFT:
-                        if (game->status != GAME_OVER) game->player.move_left = true;
+                        if (game->status != GAME_OVER && game->status) game->player.move_left = true;
                         break;
                     case SDLK_D:
                     case SDLK_RIGHT:
-                        if (game->status != GAME_OVER) game->player.move_right = true;
+                        if (game->status != GAME_OVER && game->status) game->player.move_right = true;
                         break;
                     case SDLK_SPACE:
-                        if (game->status == RESET_ROUND) game->status = IN_PLAY; game->player.game_started = true;
+                        if (game->status == RESET_ROUND && game->status) {
+                            game->status = IN_PLAY;
+                            game->player.game_started = true;
+                        }
+                        break;
+                    default:
+                        break;
+                }
+            }
+            if (e.type == SDL_EVENT_KEY_DOWN && game->status == IN_MENU) {
+                if (e.key.key == SDLK_Y) {
+                    game->status = RESET_ROUND;
+                } else if (e.key.key == SDLK_N) {
+                    running = false;
                 }
             }
             if (e.type == SDL_EVENT_KEY_UP && game->status != GAME_OVER) {
@@ -566,6 +658,8 @@ int main(int argc, char* argv[]) {
                     case SDLK_RIGHT:
                         game->player.move_right = false;
                         break;
+                    default:
+                        break;
                 }
             }
         }
@@ -573,7 +667,7 @@ int main(int argc, char* argv[]) {
         static double accumulator = 0.0f;
         accumulator += delta_time / 1000.0f;
         while (accumulator >= TARGET_DT) {
-            if (game->status != GAME_OVER) update_game(TARGET_DT);
+            if (game->status != GAME_OVER && game->status != IN_MENU) update_game(TARGET_DT);
             accumulator -= TARGET_DT;
         }
 
