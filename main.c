@@ -33,7 +33,7 @@
 #define MAX_LIVES 3
 #define MAX_SCORE (2 * BLOCK_ROWS) * (RED_POINTS + PINK_POINTS + GREEN_POINTS + YELLOW_POINTS)
 
-
+const char* save_file = ".\\save_file.txt";
 SDL_Color off_black = {33, 33, 33, 255};
 SDL_Color black = {10, 10, 10, 255};
 SDL_Color yellow = {187, 165, 59};
@@ -106,6 +106,7 @@ typedef struct {
     SDL_FRect hotbar;
     int points;
     int lives;
+    int hiscore;
     TextElements ui_elements[MAX_UITypes];
     TTF_Font* font;
     int brick_count;
@@ -129,7 +130,7 @@ void populate_ui_textures(UIType i) {
                 char buffer[15];
                 sprintf(buffer, "Points: %d", game->points);
                 s = TTF_RenderText_Blended(game->font, buffer, 0, white);
-                game->ui_elements[POINTS].x = 0.35f*WIDTH;
+                game->ui_elements[POINTS].x = 0.2f*WIDTH;
                 game->ui_elements[POINTS].y = 0;
                 break;   
             }
@@ -138,9 +139,17 @@ void populate_ui_textures(UIType i) {
                 sprintf(buffer, "%02d:%02d", game->time.minutes, game->time.seconds);
                 if (game->time.minutes > 99) sprintf(buffer, "just stop");
                 s = TTF_RenderText_Blended(game->font, buffer, 0, white);
-                game->ui_elements[TIME].x = 0.65f*WIDTH;
+                game->ui_elements[TIME].x = 0.5f*WIDTH;
                 game->ui_elements[TIME].y = 0;
                 break; 
+            }
+        case HIGH_SCORE: {
+                char buffer[20];
+                sprintf(buffer, "High Score: %03d", game->hiscore);
+                s = TTF_RenderText_Blended(game->font, buffer, 0, white);
+                game->ui_elements[HIGH_SCORE].x = 0.75 * WIDTH;
+                game->ui_elements[HIGH_SCORE].y = 0;
+                break;
             }  
         default:
             return;
@@ -158,6 +167,56 @@ void populate_ui_textures(UIType i) {
     game->ui_elements[i].texture = SDL_CreateTextureFromSurface(game->renderer, s);
     SDL_DestroySurface(s);
     return;    
+}
+
+
+int load_save_file(void) {
+    FILE* fp = fopen(save_file, "a+");
+    if (!fp) {
+        printf("Error loading file_load..\n");
+        return -1;
+    }
+    int hi_score;
+    int ret_code = fscanf(fp, "%d\n", &hi_score);
+    if (ret_code < 1) {
+        hi_score = 0;
+        rewind(fp);
+        fprintf(fp, "%d", hi_score);
+    }
+    if (hi_score > MAX_SCORE || hi_score < 0) {
+        printf("invalid high score. resetting to 0\n");
+        hi_score = 0;
+    }
+    
+    fclose(fp); 
+    
+    return hi_score;
+}
+
+void update_hiscore(void) {
+    if (game->points < game->hiscore) {
+        return;
+    }
+    if (game->points > MAX_SCORE) {
+        printf("Error - high score too high\n");
+        game->points =  MAX_SCORE;
+        return;
+    }
+
+    if (game->points < 0) {
+        printf("Error - high score too low\n");
+        game->points = 0;
+        return;
+    }
+    
+    FILE* fp = fopen(save_file, "w");
+    if (!fp) {
+        printf("Error loading file_update...\n");
+        return;
+    }
+    fprintf(fp,"%d", game->points);
+    fclose(fp);
+    return;
 }
 
 bool gamestate_create() {
@@ -179,6 +238,8 @@ bool gamestate_create() {
         printf("Error_font: %s\n", SDL_GetError());
         return false;
     }
+
+    game->hiscore = load_save_file();
 
     game->time = (Timer) {.minutes = 0, .seconds = 0, .previous_time = 0};
 
@@ -283,6 +344,7 @@ bool get_collision(SDL_FRect a, SDL_FRect b) {
 
     return false;
 }
+
 
 
 void update_game(double dt) {
@@ -402,9 +464,11 @@ void update_game(double dt) {
     if (game->brick_count <= 0) {
         game->status = GAME_OVER;
         game->player.colour = green;
+        update_hiscore();
     } else if (game->lives <= 0) {
         game->status = GAME_OVER;
         game->player.colour = red;
+        update_hiscore();
     }
 }
 
