@@ -180,7 +180,6 @@ void populate_ui_textures(UIType i) {
     return;    
 }
 
-
 int load_save_file(void) {
     FILE* fp = fopen(save_file, "a+");
     if (!fp) {
@@ -219,6 +218,8 @@ void update_hiscore(void) {
         game->points = 0;
         return;
     }
+
+    game->hiscore = game->points;
     
     FILE* fp = fopen(save_file, "w");
     if (!fp) {
@@ -227,6 +228,7 @@ void update_hiscore(void) {
     }
     fprintf(fp,"%d", game->points);
     fclose(fp);
+    populate_ui_textures(HIGH_SCORE);
     return;
 }
 
@@ -257,6 +259,7 @@ bool gamestate_create() {
     }
 
     game->menu_text = NULL;
+    game->menu_score_text = NULL;
     game->hiscore = load_save_file();
     game->time = (Timer) {.minutes = 0, .seconds = 0, .previous_time = 0};
     game->brick_count = BLOCK_COLS * BLOCK_ROWS;
@@ -332,6 +335,25 @@ bool gamestate_create() {
     return true;
 }
 
+void reset_gamestate(void) {
+    game->time.minutes = 0;
+    game->time.seconds = 0;
+    game->time.previous_time = 0;
+    populate_ui_textures(TIME);
+
+    game->points = 0;
+    populate_ui_textures(POINTS);
+    game->brick_count = BLOCK_COLS * BLOCK_ROWS;
+    game->lives = MAX_LIVES;
+    populate_ui_textures(LIVES);
+    game->player.colour = white;
+
+    for (Block* b = &game->blocks[0][0]; b < &game->blocks[0][0] + (BLOCK_ROWS * BLOCK_COLS); b++) {
+        b->alive = true;
+    }
+    
+}
+
 void free_gamestate() {
     if (game == NULL) {
         printf("gamestate empty\n");
@@ -343,7 +365,7 @@ void free_gamestate() {
     SDL_DestroyWindow(game->window);
     game->window = NULL;
     TTF_DestroyRendererTextEngine(game->text_engine);
-    game->window = NULL;
+    game->text_engine = NULL;
     TTF_DestroyText(game->menu_text);
     game->menu_text = NULL;
     TTF_DestroyText(game->menu_score_text);
@@ -369,6 +391,19 @@ bool get_collision(SDL_FRect a, SDL_FRect b) {
     return false;
 }
 
+void set_previous_score(void) {
+    char buffer[50];
+    sprintf(buffer, "previous score: %d\n", game->points);
+    if (game->menu_score_text == NULL) {
+        game->menu_score_text =  TTF_CreateText(game->text_engine, game->font, buffer, 0);
+    } else {
+      bool succ =  TTF_SetTextString(game->menu_score_text, buffer, 0);
+      if (!succ) {
+          printf("Error_set_prev_score: %s", SDL_GetError());
+      }
+    }
+}
+
 void update_game(double dt) {
     
     bool life_update = false;
@@ -376,7 +411,7 @@ void update_game(double dt) {
 
     {
         //::update timer
-        if (game->status != GAME_OVER && game->player.game_started) {
+        if (game->status != IN_MENU  && game->player.game_started) {
             time_t current_time = SDL_GetTicks();
         
             if (current_time - game->time.previous_time >= 1000) {
@@ -410,7 +445,7 @@ void update_game(double dt) {
             game->ball.speed_modifier = game->ball.speed_modifier + 0.25f;
         }
     
-        if (game->status == RESET_ROUND || game->status == GAME_OVER) {
+        if (game->status == RESET_ROUND) {
             game->first_hit_top_wall = false;
             game->first_hit_pink_or_red = false;
             game->consecutive_hits = 0;
@@ -512,13 +547,17 @@ void update_game(double dt) {
     if (score_update) populate_ui_textures(POINTS);
 
     if (game->brick_count <= 0) {
-        game->status = GAME_OVER;
         game->player.colour = green;
         update_hiscore();
+        set_previous_score();
+        reset_gamestate();
+        game->status = IN_MENU;
     } else if (game->lives <= 0) {
-        game->status = GAME_OVER;
         game->player.colour = red;
         update_hiscore();
+        set_previous_score();
+        reset_gamestate();
+        game->status = IN_MENU;
     }
 }
 
@@ -572,9 +611,11 @@ void draw_game() {
         
         TTF_SetFontSize(game->font, 36);
         TTF_DrawRendererText(game->menu_text, dest.x + 20, dest.y + 15);
-        //::todo render the player score text if just completed a game - player.game_started == true. Will need to update the
-        // this score text after each game ends.
-        
+        if (game->player.game_started && game->menu_score_text != NULL) {
+            TTF_DrawRendererText(game->menu_score_text, dest.x + 20, dest.h - 15);
+            
+        }
+                
     }
        
     
@@ -625,14 +666,14 @@ int main(int argc, char* argv[]) {
                 switch (e.key.key) {
                     case SDLK_A:
                     case SDLK_LEFT:
-                        if (game->status != GAME_OVER && game->status) game->player.move_left = true;
+                        game->player.move_left = true;
                         break;
                     case SDLK_D:
                     case SDLK_RIGHT:
-                        if (game->status != GAME_OVER && game->status) game->player.move_right = true;
+                        game->player.move_right = true;
                         break;
                     case SDLK_SPACE:
-                        if (game->status == RESET_ROUND && game->status) {
+                        if (game->status == RESET_ROUND) {
                             game->status = IN_PLAY;
                             game->player.game_started = true;
                         }
@@ -648,7 +689,7 @@ int main(int argc, char* argv[]) {
                     running = false;
                 }
             }
-            if (e.type == SDL_EVENT_KEY_UP && game->status != GAME_OVER) {
+            if (e.type == SDL_EVENT_KEY_UP && game->status != IN_MENU) {
                 switch (e.key.key) {
                     case SDLK_A:
                     case SDLK_LEFT:
@@ -667,7 +708,7 @@ int main(int argc, char* argv[]) {
         static double accumulator = 0.0f;
         accumulator += delta_time / 1000.0f;
         while (accumulator >= TARGET_DT) {
-            if (game->status != GAME_OVER && game->status != IN_MENU) update_game(TARGET_DT);
+            if (game->status != IN_MENU) update_game(TARGET_DT);
             accumulator -= TARGET_DT;
         }
 
