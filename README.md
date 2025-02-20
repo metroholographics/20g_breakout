@@ -4,7 +4,7 @@
 Game 2\
 Breakout
 
-**Space**: Serve ball
+**Space**: Serve ball/
 **LeftArrow RightArrow**: Move paddle/
 
 ![20g_breakout_end](https://github.com/user-attachments/assets/386b8c92-c4b9-4da2-8482-1a3f11e9a6e8)
