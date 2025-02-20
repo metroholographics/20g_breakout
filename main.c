@@ -346,6 +346,8 @@ void reset_gamestate(void) {
     game->brick_count = BLOCK_COLS * BLOCK_ROWS;
     game->lives = MAX_LIVES;
     populate_ui_textures(LIVES);
+    game->player.half_size = false;
+    game->player.shape = (SDL_FRect) {.x = (WIDTH * 0.5f) - (PADDLE_W * 0.5f), .y = HEIGHT - (2*PADDLE_H), .w = PADDLE_W, .h = PADDLE_H};
     game->player.colour = white;
 
     for (Block* b = &game->blocks[0][0]; b < &game->blocks[0][0] + (BLOCK_ROWS * BLOCK_COLS); b++) {
